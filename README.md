@@ -48,9 +48,7 @@ A comprehensive web application built with Streamlit for analyzing silver prices
 
 ## 🚀 Live Demo
 
-Add your deployed Streamlit app URL here
-
-Example: https://your-username-silver-price-calculator.streamlit.app
+https://silveranalysis.streamlit.app/
 
 ## 📁 Project Structure
 
