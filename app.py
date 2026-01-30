@@ -6,6 +6,8 @@ import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
 import matplotlib.pyplot as plt
+import json
+from urllib.request import urlopen
 
 # Page configuration
 st.set_page_config(
@@ -55,10 +57,24 @@ def load_karnataka_monthly_data():
     })
     return df
 
+@st.cache_data
+def load_india_geojson():
+    """Load India states GeoJSON for mapping"""
+    # Using publicly available India states GeoJSON
+    url = "https://gist.githubusercontent.com/jbrobst/56c13bbbf9d97d187fea01ca62ea5112/raw/e388c4cae20aa53cb5090210a42ebb9b765c0a36/india_states.geojson"
+    
+    try:
+        with urlopen(url) as response:
+            india_states = json.load(response)
+        return india_states
+    except:
+        return None
+
 # Load all data
 historical_data = load_historical_data()
 state_sales = load_state_sales_data()
 karnataka_monthly = load_karnataka_monthly_data()
+india_geojson = load_india_geojson()
 
 # Get latest silver price (Dec 2025)
 latest_price_per_kg = historical_data.iloc[-1]['Silver_Price_INR_per_kg']
@@ -203,17 +219,158 @@ with tab1:
             st.metric("Change %", "N/A")
 
 # ============================================================================
-# TAB 2: SALES DASHBOARD
+# TAB 2: SALES DASHBOARD WITH GEOPANDAS MAP
 # ============================================================================
 with tab2:
     st.header("🗺️ State-wise Silver Sales Dashboard")
     
-    st.info("📍 **Interactive visualization showing state-wise silver purchases across India**")
+    st.subheader("Interactive India Map - State-wise Silver Purchases")
     
-    st.subheader("State-wise Silver Purchase Distribution")
+    # Map visualization option
+    map_type = st.radio("Select Visualization Type:", 
+                        ["Choropleth Map (Plotly)", "GeoPandas Static Map"], 
+                        horizontal=True)
     
-    # Create a choropleth-style bar chart (alternative to map)
-    # Sort data for better visualization
+    if map_type == "Choropleth Map (Plotly)":
+        # Create Plotly choropleth map
+        if india_geojson:
+            # Normalize state names for matching
+            state_sales_normalized = state_sales.copy()
+            
+            # Create state name mapping for better matching
+            state_name_mapping = {
+                'Andhra Pradesh': 'Andhra Pradesh',
+                'Arunachal Pradesh': 'Arunachal Pradesh',
+                'Assam': 'Assam',
+                'Bihar': 'Bihar',
+                'Chhattisgarh': 'Chhattisgarh',
+                'Goa': 'Goa',
+                'Gujarat': 'Gujarat',
+                'Haryana': 'Haryana',
+                'Himachal Pradesh': 'Himachal Pradesh',
+                'Jharkhand': 'Jharkhand',
+                'Karnataka': 'Karnataka',
+                'Kerala': 'Kerala',
+                'Madhya Pradesh': 'Madhya Pradesh',
+                'Maharashtra': 'Maharashtra',
+                'Manipur': 'Manipur',
+                'Meghalaya': 'Meghalaya',
+                'Mizoram': 'Mizoram',
+                'Nagaland': 'Nagaland',
+                'Odisha': 'Odisha',
+                'Punjab': 'Punjab',
+                'Rajasthan': 'Rajasthan',
+                'Sikkim': 'Sikkim',
+                'Tamil Nadu': 'Tamil Nadu',
+                'Telangana': 'Telangana',
+                'Tripura': 'Tripura',
+                'Uttar Pradesh': 'Uttar Pradesh',
+                'Uttarakhand': 'Uttarakhand',
+                'West Bengal': 'West Bengal',
+                'Delhi': 'NCT of Delhi',
+                'Jammu & Kashmir': 'Jammu and Kashmir',
+                'Ladakh': 'Ladakh'
+            }
+            
+            state_sales_normalized['State_Mapped'] = state_sales_normalized['State'].map(
+                lambda x: state_name_mapping.get(x, x)
+            )
+            
+            fig_map = px.choropleth(
+                state_sales_normalized,
+                geojson=india_geojson,
+                featureidkey='properties.ST_NM',
+                locations='State_Mapped',
+                color='Silver_Purchased_kg',
+                hover_name='State',
+                hover_data={'State_Mapped': False, 'Silver_Purchased_kg': ':,.0f'},
+                title='India State-wise Silver Purchases (in kg) - Darker shades indicate higher purchases',
+                color_continuous_scale='Blues',
+                labels={'Silver_Purchased_kg': 'Purchase (kg)'}
+            )
+            
+            fig_map.update_geos(fitbounds="locations", visible=False)
+            fig_map.update_layout(height=700, margin={"r":0,"t":50,"l":0,"b":0})
+            
+            st.plotly_chart(fig_map, use_container_width=True)
+            st.success("✅ Interactive Choropleth Map - Hover over states to see purchase details")
+        else:
+            st.error("Unable to load map data. Showing alternative visualization.")
+    
+    else:
+        # GeoPandas static map visualization
+        st.info("📍 GeoPandas Visualization - Static map with darker shades for higher purchases")
+        
+        try:
+            # Create GeoDataFrame from the GeoJSON
+            if india_geojson:
+                gdf = gpd.GeoDataFrame.from_features(india_geojson['features'])
+                
+                # Normalize state names
+                state_name_mapping = {
+                    'NCT of Delhi': 'Delhi',
+                    'Jammu and Kashmir': 'Jammu & Kashmir',
+                }
+                
+                gdf['ST_NM'] = gdf['ST_NM'].replace(state_name_mapping)
+                
+                # Merge with sales data
+                gdf_merged = gdf.merge(
+                    state_sales,
+                    left_on='ST_NM',
+                    right_on='State',
+                    how='left'
+                )
+                
+                # Create the map
+                fig, ax = plt.subplots(1, 1, figsize=(15, 12))
+                
+                gdf_merged.plot(
+                    column='Silver_Purchased_kg',
+                    cmap='Blues',
+                    linewidth=0.8,
+                    ax=ax,
+                    edgecolor='black',
+                    legend=True,
+                    legend_kwds={
+                        'label': "Silver Purchase (kg)",
+                        'orientation': "horizontal",
+                        'shrink': 0.7,
+                        'pad': 0.05
+                    },
+                    missing_kwds={'color': 'lightgrey', 'label': 'No Data'}
+                )
+                
+                # Add state labels
+                for idx, row in gdf_merged.iterrows():
+                    if pd.notna(row['Silver_Purchased_kg']):
+                        centroid = row.geometry.centroid
+                        ax.annotate(
+                            text=f"{row['ST_NM']}\n{row['Silver_Purchased_kg']:,.0f} kg",
+                            xy=(centroid.x, centroid.y),
+                            ha='center',
+                            fontsize=7,
+                            weight='bold',
+                            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7)
+                        )
+                
+                ax.axis('off')
+                ax.set_title('State-wise Silver Purchases in India\n(Darker shades = Higher purchases)', 
+                           fontsize=18, weight='bold', pad=20)
+                
+                st.pyplot(fig)
+                st.success("✅ GeoPandas Static Map - Darker blue shades indicate higher silver purchases")
+            else:
+                st.error("Unable to load GeoPandas map")
+                
+        except Exception as e:
+            st.error(f"Error creating GeoPandas map: {str(e)}")
+            st.info("Showing alternative visualization below")
+    
+    # Fallback horizontal bar chart
+    st.markdown("---")
+    st.subheader("Alternative View: Horizontal Bar Chart")
+    
     sorted_sales = state_sales.sort_values('Silver_Purchased_kg', ascending=True)
     
     fig_geo = px.bar(
@@ -221,7 +378,7 @@ with tab2:
         y='State',
         x='Silver_Purchased_kg',
         orientation='h',
-        title='India State-wise Silver Purchases (in kg)',
+        title='State-wise Silver Purchases - Bar Chart View',
         labels={'Silver_Purchased_kg': 'Silver Purchased (kg)', 'State': 'State'},
         color='Silver_Purchased_kg',
         color_continuous_scale='Blues',
@@ -231,67 +388,8 @@ with tab2:
     fig_geo.update_layout(showlegend=False)
     st.plotly_chart(fig_geo, use_container_width=True)
     
-    # GeoPandas integration code example
-    st.markdown("### 🗺️ GeoPandas Map Integration Code")
-    st.code("""
-# Install required packages:
-# pip install geopandas matplotlib
-
-import geopandas as gpd
-import matplotlib.pyplot as plt
-import pandas as pd
-
-# Load India shapefile (download from https://github.com/geohacker/india)
-india_map = gpd.read_file('india_states.geojson')
-
-# Load your state sales data
-state_sales = pd.read_csv('state_wise_silver_purchased_kg.csv')
-
-# Merge the datasets
-india_map = india_map.merge(
-    state_sales, 
-    left_on='st_nm',  # Adjust column name based on your shapefile
-    right_on='State',
-    how='left'
-)
-
-# Create the choropleth map
-fig, ax = plt.subplots(1, 1, figsize=(15, 12))
-india_map.plot(
-    column='Silver_Purchased_kg',
-    cmap='Blues',
-    linewidth=0.8,
-    ax=ax,
-    edgecolor='black',
-    legend=True,
-    legend_kwds={
-        'label': "Silver Purchase (kg)",
-        'orientation': "horizontal",
-        'shrink': 0.7,
-        'pad': 0.05
-    },
-    missing_kwds={'color': 'lightgrey', 'label': 'No Data'}
-)
-
-# Add state labels (optional)
-india_map.apply(
-    lambda x: ax.annotate(
-        text=x['st_nm'], 
-        xy=x.geometry.centroid.coords[0], 
-        ha='center', 
-        fontsize=8
-    ), 
-    axis=1
-)
-
-ax.axis('off')
-ax.set_title('State-wise Silver Purchases in India', fontsize=20, weight='bold', pad=20)
-
-# Display in Streamlit
-st.pyplot(fig)
-    """, language='python')
-    
     # Display data table
+    st.markdown("---")
     st.markdown("### 📊 State-wise Purchase Data Table")
     
     # Add rank column
