@@ -123,23 +123,6 @@ Your app will be live within minutes!
 - **AWS/GCP/Azure**: Deploy using Docker containers
 - **Local Network**: Use streamlit run app.py --server.address=0.0.0.0
 
-## 📸 Screenshots
-
-### Silver Price Calculator
-- Real-time price calculations with currency conversion
-- Historical price trends with interactive filters
-- Price statistics and breakdowns
-
-### Sales Dashboard
-- State-wise silver purchase visualization
-- Interactive geographical representation
-- Comprehensive data tables
-
-### Sales Insights
-- Top 5 states bar chart
-- Karnataka monthly trends line chart
-- Regional distribution analysis
-
 ## 🔧 Usage Examples
 
 ### Calculate Silver Cost
