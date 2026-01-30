@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
+import geopandas as gpd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import numpy as np
+import matplotlib.pyplot as plt
 import json
 from urllib.request import urlopen
 
@@ -34,70 +36,26 @@ def load_state_sales_data():
     return df
 
 @st.cache_data
-def load_india_january_data():
-    """Generate India's January 2026 daily silver purchase data across all states"""
-    import random
-    random.seed(42)  # For reproducible data
+def load_karnataka_monthly_data():
+    """Generate Karnataka monthly silver purchase data"""
+    # Distribute Karnataka's annual total (16,800 kg) across 12 months
+    # with realistic seasonal variation (higher in festival months)
+    karnataka_total = 16800
     
-    dates = pd.date_range(start='2026-01-01', end='2026-01-30', freq='D')
+    # Monthly distribution weights (festival seasons have higher purchases)
+    weights = [1.0, 0.9, 1.1, 0.95, 0.85, 0.9, 0.88, 0.92, 1.05, 1.15, 1.2, 1.3]
+    total_weight = sum(weights)
     
-    # Base daily purchase for entire India with realistic variations
-    daily_purchases = []
+    monthly_purchases = [(karnataka_total * w / total_weight) for w in weights]
     
-    # Total annual from state data: 215,990 kg
-    # Approximate daily average: 215,990 / 365 ≈ 592 kg per day
-    
-    for date in dates:
-        base_purchase = 592  # Base daily purchase for all of India in kg
-        
-        # Weekend boost (Saturday, Sunday) - 15-25% increase
-        if date.dayofweek >= 5:
-            base_purchase += random.uniform(90, 150)
-        
-        # Mid-month boost (around 15th - salary day) - 20-30% increase
-        if 14 <= date.day <= 16:
-            base_purchase += random.uniform(120, 180)
-        
-        # Month-end boost (26th onwards - salary days) - 25-35% increase
-        if date.day >= 26:
-            base_purchase += random.uniform(150, 210)
-        
-        # Republic Day boost (26th January) - special increase
-        if date.day == 26:
-            base_purchase += 200
-        
-        # New Year boost (1st January)
-        if date.day == 1:
-            base_purchase += 150
-        
-        # Add random daily variation
-        base_purchase += random.uniform(-50, 100)
-        
-        daily_purchases.append(round(base_purchase, 1))
+    months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
     
     df = pd.DataFrame({
-        'Date': dates,
-        'Day': dates.day,
-        'DayOfWeek': dates.day_name(),
-        'Purchase_KG': daily_purchases
+        'Month': months,
+        'Purchase_KG': monthly_purchases
     })
-    
     return df
-
-@st.cache_data
-def load_state_wise_january_breakdown():
-    """Generate state-wise January 2026 contribution"""
-    # Using the state purchase percentages to distribute January purchases
-    state_sales_df = load_state_sales_data()
-    
-    # Calculate percentage contribution
-    total_purchases = state_sales_df['Silver_Purchased_kg'].sum()
-    state_sales_df['Percentage'] = (state_sales_df['Silver_Purchased_kg'] / total_purchases * 100).round(2)
-    
-    # Estimate January purchases (1/12 of annual with seasonal boost)
-    state_sales_df['Jan_2026_Purchase_KG'] = (state_sales_df['Silver_Purchased_kg'] / 12 * 1.1).round(0).astype(int)
-    
-    return state_sales_df.sort_values('Jan_2026_Purchase_KG', ascending=False)
 
 @st.cache_data
 def load_india_geojson():
@@ -115,7 +73,7 @@ def load_india_geojson():
 # Load all data
 historical_data = load_historical_data()
 state_sales = load_state_sales_data()
-india_january = load_india_january_data()
+karnataka_monthly = load_karnataka_monthly_data()
 india_geojson = load_india_geojson()
 
 # Get latest silver price (Dec 2025)
@@ -261,35 +219,72 @@ with tab1:
             st.metric("Change %", "N/A")
 
 # ============================================================================
-# TAB 2: SALES DASHBOARD
+# TAB 2: SALES DASHBOARD WITH GEOPANDAS MAP
 # ============================================================================
 with tab2:
     st.header("🗺️ State-wise Silver Sales Dashboard")
     
     st.subheader("Interactive India Map - State-wise Silver Purchases")
     
-    # Plotly choropleth map
-    try:
+    # Map visualization option
+    map_type = st.radio("Select Visualization Type:", 
+                        ["Choropleth Map (Plotly)", "GeoPandas Static Map"], 
+                        horizontal=True)
+    
+    if map_type == "Choropleth Map (Plotly)":
+        # Create Plotly choropleth map
         if india_geojson:
-            # State name mapping for GeoJSON matching
+            # Normalize state names for matching
+            state_sales_normalized = state_sales.copy()
+            
+            # Create state name mapping for better matching
             state_name_mapping = {
+                'Andhra Pradesh': 'Andhra Pradesh',
+                'Arunachal Pradesh': 'Arunachal Pradesh',
+                'Assam': 'Assam',
+                'Bihar': 'Bihar',
+                'Chhattisgarh': 'Chhattisgarh',
+                'Goa': 'Goa',
+                'Gujarat': 'Gujarat',
+                'Haryana': 'Haryana',
+                'Himachal Pradesh': 'Himachal Pradesh',
+                'Jharkhand': 'Jharkhand',
+                'Karnataka': 'Karnataka',
+                'Kerala': 'Kerala',
+                'Madhya Pradesh': 'Madhya Pradesh',
+                'Maharashtra': 'Maharashtra',
+                'Manipur': 'Manipur',
+                'Meghalaya': 'Meghalaya',
+                'Mizoram': 'Mizoram',
+                'Nagaland': 'Nagaland',
+                'Odisha': 'Odisha',
+                'Punjab': 'Punjab',
+                'Rajasthan': 'Rajasthan',
+                'Sikkim': 'Sikkim',
+                'Tamil Nadu': 'Tamil Nadu',
+                'Telangana': 'Telangana',
+                'Tripura': 'Tripura',
+                'Uttar Pradesh': 'Uttar Pradesh',
+                'Uttarakhand': 'Uttarakhand',
+                'West Bengal': 'West Bengal',
                 'Delhi': 'NCT of Delhi',
                 'Jammu & Kashmir': 'Jammu and Kashmir',
+                'Ladakh': 'Ladakh'
             }
             
-            state_sales_mapped = state_sales.copy()
-            state_sales_mapped['State_Mapped'] = state_sales_mapped['State'].replace(state_name_mapping)
+            state_sales_normalized['State_Mapped'] = state_sales_normalized['State'].map(
+                lambda x: state_name_mapping.get(x, x)
+            )
             
-            # Create interactive choropleth map
             fig_map = px.choropleth(
-                state_sales_mapped,
+                state_sales_normalized,
                 geojson=india_geojson,
                 featureidkey='properties.ST_NM',
                 locations='State_Mapped',
                 color='Silver_Purchased_kg',
                 hover_name='State',
                 hover_data={'State_Mapped': False, 'Silver_Purchased_kg': ':,.0f'},
-                title='India State-wise Silver Purchases - Darker Shades Indicate Higher Purchases',
+                title='India State-wise Silver Purchases (in kg) - Darker shades indicate higher purchases',
                 color_continuous_scale='Blues',
                 labels={'Silver_Purchased_kg': 'Purchase (kg)'}
             )
@@ -298,17 +293,83 @@ with tab2:
             fig_map.update_layout(height=700, margin={"r":0,"t":50,"l":0,"b":0})
             
             st.plotly_chart(fig_map, use_container_width=True)
-            st.success("✅ Interactive Choropleth Map - Hover over states for details. Darker blue = Higher purchases")
+            st.success("✅ Interactive Choropleth Map - Hover over states to see purchase details")
         else:
-            st.warning("Map data loading...")
-            
-    except Exception as e:
-        st.warning(f"Map visualization in progress...")
-        st.info("Showing alternative visualization below")
+            st.error("Unable to load map data. Showing alternative visualization.")
     
-    # Horizontal bar chart as alternative/supplement
+    else:
+        # GeoPandas static map visualization
+        st.info("📍 GeoPandas Visualization - Static map with darker shades for higher purchases")
+        
+        try:
+            # Create GeoDataFrame from the GeoJSON
+            if india_geojson:
+                gdf = gpd.GeoDataFrame.from_features(india_geojson['features'])
+                
+                # Normalize state names
+                state_name_mapping = {
+                    'NCT of Delhi': 'Delhi',
+                    'Jammu and Kashmir': 'Jammu & Kashmir',
+                }
+                
+                gdf['ST_NM'] = gdf['ST_NM'].replace(state_name_mapping)
+                
+                # Merge with sales data
+                gdf_merged = gdf.merge(
+                    state_sales,
+                    left_on='ST_NM',
+                    right_on='State',
+                    how='left'
+                )
+                
+                # Create the map
+                fig, ax = plt.subplots(1, 1, figsize=(15, 12))
+                
+                gdf_merged.plot(
+                    column='Silver_Purchased_kg',
+                    cmap='Blues',
+                    linewidth=0.8,
+                    ax=ax,
+                    edgecolor='black',
+                    legend=True,
+                    legend_kwds={
+                        'label': "Silver Purchase (kg)",
+                        'orientation': "horizontal",
+                        'shrink': 0.7,
+                        'pad': 0.05
+                    },
+                    missing_kwds={'color': 'lightgrey', 'label': 'No Data'}
+                )
+                
+                # Add state labels
+                for idx, row in gdf_merged.iterrows():
+                    if pd.notna(row['Silver_Purchased_kg']):
+                        centroid = row.geometry.centroid
+                        ax.annotate(
+                            text=f"{row['ST_NM']}\n{row['Silver_Purchased_kg']:,.0f} kg",
+                            xy=(centroid.x, centroid.y),
+                            ha='center',
+                            fontsize=7,
+                            weight='bold',
+                            bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7)
+                        )
+                
+                ax.axis('off')
+                ax.set_title('State-wise Silver Purchases in India\n(Darker shades = Higher purchases)', 
+                           fontsize=18, weight='bold', pad=20)
+                
+                st.pyplot(fig)
+                st.success("✅ GeoPandas Static Map - Darker blue shades indicate higher silver purchases")
+            else:
+                st.error("Unable to load GeoPandas map")
+                
+        except Exception as e:
+            st.error(f"Error creating GeoPandas map: {str(e)}")
+            st.info("Showing alternative visualization below")
+    
+    # Fallback horizontal bar chart
     st.markdown("---")
-    st.subheader("State-wise Purchase Visualization")
+    st.subheader("Alternative View: Horizontal Bar Chart")
     
     sorted_sales = state_sales.sort_values('Silver_Purchased_kg', ascending=True)
     
@@ -343,7 +404,6 @@ with tab2:
     
     # Summary statistics
     st.markdown("---")
-    st.subheader("📈 Summary Statistics")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric("Total Purchases", f"{state_sales['Silver_Purchased_kg'].sum():,.0f} kg")
@@ -369,7 +429,7 @@ with tab3:
         top_5_states,
         x='State',
         y='Silver_Purchased_kg',
-        title='Top 5 States by Silver Purchase Volume (Annual)',
+        title='Top 5 States by Silver Purchase Volume',
         labels={'Silver_Purchased_kg': 'Purchase (kg)', 'State': 'State'},
         color='Silver_Purchased_kg',
         color_continuous_scale='Blues',
@@ -404,184 +464,73 @@ with tab3:
     
     st.markdown("---")
     
-    # ========================================================================
-    # Insight 2: ALL INDIA January 2026 Daily Trends
-    # ========================================================================
-    st.subheader("2. All India Daily Silver Purchase Trends - January 2026")
+    # Insight 2: Karnataka monthly trends
+    st.subheader("2. Karnataka Monthly Silver Purchase Trends")
     
-    # Create the main line chart
-    fig_india = px.line(
-        india_january,
-        x='Date',
+    fig_karnataka = px.line(
+        karnataka_monthly,
+        x='Month',
         y='Purchase_KG',
-        title='Daily Silver Purchases Across India (January 2026)',
-        labels={'Purchase_KG': 'Purchase (kg)', 'Date': 'Date'},
+        title='Monthly Silver Purchases in Karnataka (2025)',
+        labels={'Purchase_KG': 'Purchase (kg)', 'Month': 'Month'},
         markers=True,
         template='plotly_white'
     )
     
-    fig_india.update_traces(
+    fig_karnataka.update_traces(
         line_color='#1f77b4',
         line_width=3,
-        marker=dict(size=8, color='#C0C0C0', line=dict(width=2, color='#1f77b4'))
+        marker=dict(size=10, color='#C0C0C0', line=dict(width=2, color='#1f77b4'))
     )
-    fig_india.update_layout(height=500, hovermode='x unified')
+    fig_karnataka.update_layout(height=500, hovermode='x unified')
     
-    # Add vertical lines for important dates
-    fig_india.add_vline(
-        x=pd.Timestamp('2026-01-01'),
-        line_dash="dash",
-        line_color="green",
-        annotation_text="New Year",
-        annotation_position="top"
-    )
+    st.plotly_chart(fig_karnataka, use_container_width=True)
     
-    fig_india.add_vline(
-        x=pd.Timestamp('2026-01-26'),
-        line_dash="dash",
-        line_color="red",
-        annotation_text="Republic Day",
-        annotation_position="top"
-    )
-    
-    st.plotly_chart(fig_india, use_container_width=True)
-    
-    # India January statistics
-    st.markdown("### 📊 January 2026 Statistics - All India")
+    # Karnataka statistics
     col1, col2, col3, col4 = st.columns(4)
-    
     with col1:
-        max_day = india_january.loc[india_january['Purchase_KG'].idxmax()]
-        st.metric("Highest Day", 
-                  f"Jan {max_day['Day']:.0f}", 
-                  f"{max_day['Purchase_KG']:.1f} kg")
+        max_month = karnataka_monthly.loc[karnataka_monthly['Purchase_KG'].idxmax()]
+        st.metric("Highest Month", max_month['Month'], f"{max_month['Purchase_KG']:.0f} kg")
     with col2:
-        min_day = india_january.loc[india_january['Purchase_KG'].idxmin()]
-        st.metric("Lowest Day", 
-                  f"Jan {min_day['Day']:.0f}", 
-                  f"{min_day['Purchase_KG']:.1f} kg")
+        min_month = karnataka_monthly.loc[karnataka_monthly['Purchase_KG'].idxmin()]
+        st.metric("Lowest Month", min_month['Month'], f"{min_month['Purchase_KG']:.0f} kg")
     with col3:
-        st.metric("Average Daily", f"{india_january['Purchase_KG'].mean():.0f} kg")
+        st.metric("Average Purchase", f"{karnataka_monthly['Purchase_KG'].mean():.0f} kg/month")
     with col4:
-        st.metric("Total Jan 2026", f"{india_january['Purchase_KG'].sum():,.0f} kg")
+        st.metric("Total Annual", f"{karnataka_monthly['Purchase_KG'].sum():,.0f} kg")
     
-    # Display India's daily data
-    st.markdown("---")
-    st.markdown("### 📅 India Daily Purchase Data - January 2026")
-    
-    # Create a better display format
-    india_display = india_january.copy()
-    india_display['Date_Formatted'] = india_display['Date'].dt.strftime('%d %b %Y')
-    india_display = india_display[['Date_Formatted', 'DayOfWeek', 'Purchase_KG']]
-    india_display.columns = ['Date', 'Day of Week', 'Purchase (kg)']
-    india_display['Purchase (kg)'] = india_display['Purchase (kg)'].round(1)
-    
-    # Split into two columns for better display
-    col1, col2 = st.columns(2)
-    
-    mid_point = len(india_display) // 2
-    
-    with col1:
-        st.markdown("#### First Half of January (1-15)")
-        st.dataframe(india_display.iloc[:mid_point].reset_index(drop=True), 
-                    use_container_width=True, height=400)
-    
-    with col2:
-        st.markdown("#### Second Half of January (16-30)")
-        st.dataframe(india_display.iloc[mid_point:].reset_index(drop=True), 
-                    use_container_width=True, height=400)
-    
-    # Weekly analysis
-    st.markdown("---")
-    st.markdown("### 📈 Weekly Analysis - January 2026 (All India)")
-    
-    # Create weekly aggregation
-    india_january['Week'] = india_january['Date'].dt.isocalendar().week
-    weekly_data = india_january.groupby('Week')['Purchase_KG'].agg(['sum', 'mean', 'count']).reset_index()
-    weekly_data.columns = ['Week', 'Total Purchase (kg)', 'Avg Daily (kg)', 'Days']
-    
-    # Create week labels
-    week_labels = ['Week 1 (1-4 Jan)', 'Week 2 (5-11 Jan)', 'Week 3 (12-18 Jan)', 
-                   'Week 4 (19-25 Jan)', 'Week 5 (26-30 Jan)']
-    weekly_data['Week Label'] = week_labels[:len(weekly_data)]
-    
-    fig_weekly = px.bar(
-        weekly_data,
-        x='Week Label',
-        y='Total Purchase (kg)',
-        title='Weekly Silver Purchases Across India - January 2026',
-        labels={'Total Purchase (kg)': 'Total Purchase (kg)', 'Week Label': 'Week'},
-        color='Total Purchase (kg)',
-        color_continuous_scale='Blues',
-        text='Total Purchase (kg)'
-    )
-    
-    fig_weekly.update_traces(texttemplate='%{text:,.0f} kg', textposition='outside')
-    fig_weekly.update_layout(showlegend=False, height=400)
-    
-    st.plotly_chart(fig_weekly, use_container_width=True)
-    
-    st.dataframe(weekly_data[['Week Label', 'Total Purchase (kg)', 'Avg Daily (kg)', 'Days']], 
-                use_container_width=True)
-    
-    # State-wise January breakdown
-    st.markdown("---")
-    st.markdown("### 🗺️ State-wise January 2026 Purchase Estimates")
-    
-    state_jan_breakdown = load_state_wise_january_breakdown()
-    
-    # Create bar chart for top 10 states in January
-    top_10_jan = state_jan_breakdown.head(10)
-    
-    fig_jan_states = px.bar(
-        top_10_jan,
-        x='State',
-        y='Jan_2026_Purchase_KG',
-        title='Top 10 States - January 2026 Silver Purchases',
-        labels={'Jan_2026_Purchase_KG': 'January Purchase (kg)', 'State': 'State'},
-        color='Jan_2026_Purchase_KG',
-        color_continuous_scale='Blues',
-        text='Jan_2026_Purchase_KG'
-    )
-    
-    fig_jan_states.update_traces(texttemplate='%{text:,.0f} kg', textposition='outside')
-    fig_jan_states.update_layout(showlegend=False, height=500)
-    fig_jan_states.update_xaxes(tickangle=-45)
-    
-    st.plotly_chart(fig_jan_states, use_container_width=True)
-    
-    # Display state-wise table
-    st.markdown("#### State-wise January 2026 Breakdown")
-    st.dataframe(
-        state_jan_breakdown[['State', 'Jan_2026_Purchase_KG', 'Percentage']].head(15),
-        use_container_width=True
-    )
+    # Display Karnataka monthly data
+    st.markdown("### Karnataka Monthly Data")
+    karnataka_display = karnataka_monthly.copy()
+    karnataka_display['Purchase_KG'] = karnataka_display['Purchase_KG'].round(0).astype(int)
+    karnataka_display['% of Annual'] = (karnataka_display['Purchase_KG'] / 
+                                        karnataka_display['Purchase_KG'].sum() * 100).round(2)
+    st.dataframe(karnataka_display, use_container_width=True)
     
     # Additional insights
     st.markdown("---")
-    st.subheader("📌 Key Market Insights - January 2026")
+    st.subheader("📌 Key Market Insights")
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
-        **National Trends (January 2026):**
-        - Strong start with **New Year shopping** on Jan 1st
-        - Consistent weekday demand averaging **~600 kg/day**
-        - **Weekend spikes** show 20-25% higher purchases
-        - **Republic Day** (Jan 26) recorded peak purchases
-        - Month-end salary days drove significant demand increase
+        **Regional Distribution:**
+        - Maharashtra (22,000 kg) dominates the market
+        - Rajasthan (19,800 kg) and Andhra Pradesh (18,500 kg) follow closely
+        - Top 3 states represent 27.6% of total national purchases
+        - North-eastern states show lower consumption patterns
+        - Karnataka (16,800 kg) is 5th largest consumer
         """)
     
     with col2:
-        highest_day = india_january.loc[india_january['Purchase_KG'].idxmax()]
-        st.markdown(f"""
-        **January 2026 Highlights:**
-        - Highest purchase day: **Jan {highest_day['Day']:.0f}** ({highest_day['Purchase_KG']:.1f} kg)
-        - Total January purchases: **{india_january['Purchase_KG'].sum():,.0f} kg**
-        - Average daily purchase: **{india_january['Purchase_KG'].mean():.0f} kg**
-        - **Maharashtra** continues to lead with estimated 2,000+ kg in January
-        - Festival and salary cycles strongly influence purchase patterns
+        st.markdown("""
+        **Karnataka Seasonal Trends:**
+        - Peak purchases in **December** (festive season)
+        - Consistent demand from **October to December**
+        - Lower purchases during **May-August**
+        - Strong industrial hub presence drives steady demand
+        - Annual consumption: 16,800 kg (7.8% of national total)
         """)
     
     # Regional comparison
@@ -611,7 +560,7 @@ with tab3:
         regional_df,
         values='Total_Purchase_kg',
         names='Region',
-        title='Regional Distribution of Silver Purchases (Annual)',
+        title='Regional Distribution of Silver Purchases',
         color_discrete_sequence=px.colors.sequential.Blues_r
     )
     
